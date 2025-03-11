@@ -93,9 +93,9 @@ func (c *Client) GetCityByIp(input net.IP) string {
 }
 
 // 调用火山云接口，判断IP是否归属火山云
-func (c *Client) Checkvolcengine(input net.IP) (cdn string, isp string) {
+func (c *Client) Checkvolcengine(input net.IP) (cdn string, isp string, iscdn bool) {
 	if c.config.VolcengineKey == "" {
-		return "", ""
+		return "", "", false
 	}
 	ip := input.String()
 	region := "cn-beijing"
@@ -115,28 +115,30 @@ func (c *Client) Checkvolcengine(input net.IP) (cdn string, isp string) {
 	response, err := svc.DescribeCdnIP(describeCdnIPInput)
 	if err != nil {
 		slog.Error("火山云接口查询异常:", err)
-		return "", ""
+		return "", "", false
 	}
 	patternStr := `CdnIp: (.*?),`
 	Platform, err := gregex.MatchString(patternStr, response.String())
 	if err != nil {
-		return "", ""
+		slog.Error("火山云json解析出错", err)
+		return "", "", false
 	}
 	if Platform[1] == "True" {
 		patternStr = `Location: "(.*?)"`
 		result, reerr := gregex.MatchString(patternStr, response.String())
 		if reerr != nil {
-			return "火山云", ""
+			slog.Error("火山云json解析错误", reerr)
+			return "", "", false
 		}
-		return "火山云", result[1]
+		return "火山云", result[1], true
 	}
-	return "", ""
+	return "", "", false
 }
 
 // 调用腾讯云DescribeCdnIp接口，判断ip是否属于腾讯云
-func (c *Client) CheckTencent(input net.IP) (cdn string, isp string) {
+func (c *Client) CheckTencent(input net.IP) (cdn string, isp string, iscdn bool) {
 	if c.config.TencentId == "" {
-		return "", ""
+		return "", "", false
 	}
 	ip := input.String()
 	// 实例化一个认证对象，入参需要传入腾讯云账户 SecretId 和 SecretKey，此处还需注意密钥对的保密
@@ -156,28 +158,29 @@ func (c *Client) CheckTencent(input net.IP) (cdn string, isp string) {
 	//fmt.Print(response.ToJsonString())
 	if err != nil {
 		slog.Error("腾讯接口查询异常:", err)
-		return "", ""
+		return "", "", false
 	}
 	patternStr := `"Platform":"(.*?)"`
 	Platform, err := gregex.MatchString(patternStr, response.ToJsonString())
 	if err != nil {
-		return "", ""
+		return "", "", false
 	}
 	if Platform[1] == "yes" {
 		patternStr = `"Location":"(.*?)"`
 		result, reerr := gregex.MatchString(patternStr, response.ToJsonString())
 		if reerr != nil {
-			return "腾讯云", ""
+			slog.Error("腾讯云json解析错误", reerr)
+			return "", "", false
 		}
-		return "腾讯云", result[1]
+		return "腾讯云", result[1], true
 	}
-	return "", ""
+	return "", "", false
 }
 
 // 调用阿里云DescribeIpInfo接口，判断ip是否属于阿里云
-func (c *Client) CheckAliyun(input net.IP) (cdn string, isp string) {
+func (c *Client) CheckAliyun(input net.IP) (cdn string, isp string, iscdn bool) {
 	if c.config.AlibabaId == "" {
-		return "", ""
+		return "", "", false
 	}
 	ip := input.String()
 	config := &ali_openapi.Config{
@@ -191,30 +194,32 @@ func (c *Client) CheckAliyun(input net.IP) (cdn string, isp string) {
 	client, err := ali_cdn20180510.NewClient(config)
 	if err != nil {
 		slog.Error("阿里云接口查询异常:", err)
-		return "", ""
+		return "", "", false
 	}
 	describeIpInfoRequest := &ali_cdn20180510.DescribeIpInfoRequest{IP: ali_tea.String(ip)}
 	runtime := &ali_util.RuntimeOptions{}
 	response, err := client.DescribeIpInfoWithOptions(describeIpInfoRequest, runtime)
 	if err != nil {
-		return "", ""
+		slog.Error("阿里云接口查询异常:", err)
+		return "", "", false
 	}
 	//fmt.Printf("%s",response.Body.String())
 	json, err := gjson.DecodeToJson(response.Body.String())
 	if err != nil {
-		return "", ""
+		slog.Error("阿里云json解析出错", err)
+		return "", "", false
 	}
 	if json.Get("CdnIp").String() == "True" {
-		return "阿里云", json.Get("ISP").String()
+		return "阿里云", json.Get("ISP").String(), true
 	} else {
-		return "", ""
+		return "", "", false
 	}
 }
 
 // 调用百度云describeIp接口，判断ip是否属于百度云
-func (c *Client) CheckBaidu(input net.IP) (cdn string, isp string) {
+func (c *Client) CheckBaidu(input net.IP) (cdn string, isp string, iscdn bool) {
 	if c.config.BaiduId == "" {
-		return "", ""
+		return "", "", false
 	}
 	ip := input.String()
 	req := &bd_bce.BceRequest{}
@@ -227,34 +232,37 @@ func (c *Client) CheckBaidu(input net.IP) (cdn string, isp string) {
 	client, err := bd_bce.NewBceClientWithAkSk(c.config.BaiduId, c.config.BaiduKey, "https://cdn.baidubce.com")
 	if err != nil {
 		slog.Error("百度云接口查询异常:", err)
-		return "", ""
+		return "", "", false
 	}
 	resp := &bd_bce.BceResponse{}
 	err = client.SendRequest(req, resp)
 	if err != nil {
-		return "", ""
+		slog.Error("百度云接口查询异常:", err)
+		return "", "", false
 	}
 	respBody := resp.Body()
 	defer respBody.Close()
 	body, err := ioutil.ReadAll(respBody)
 	if err != nil {
-		return "", ""
+		slog.Error("百度云json解析失败", err)
+		return "", "", false
 	}
 	json, err := gjson.DecodeToJson(string(body))
 	if err != nil {
-		return "", ""
+		slog.Error("百度云json解析失败", err)
+		return "", "", false
 	}
 	if json.Get("cdnIP").String() == "true" {
-		return "百度云", json.Get("isp").String()
+		return "百度云", json.Get("isp").String(), true
 	} else {
-		return "", ""
+		return "", "", false
 	}
 }
 
 // 调用华为云接口，判断IP是否属于华为云
-func (c *Client) CheckHuawei(input net.IP) (cdn string, isp string) {
+func (c *Client) CheckHuawei(input net.IP) (cdn string, isp string, iscdn bool) {
 	if c.config.HuaweiID == "" {
-		return "", ""
+		return "", "", false
 	}
 	ip := input.String()
 
@@ -274,25 +282,28 @@ func (c *Client) CheckHuawei(input net.IP) (cdn string, isp string) {
 	response, err := client.ShowIpInfo(request)
 	if err != nil {
 		slog.Error("华为云接口查询异常:", err)
-		return "", ""
+		return "", "", false
 	}
 	json, err := gjson.DecodeToJson(response)
 	if err != nil {
-		return "", ""
+		return "", "", false
 	}
 	//归属
 	if json.Get("belongs").String() == "true" {
-		return "华为云", json.Get("ip").String()
+		return "华为云", json.Get("ip").String(), true
 	}
-	return "", ""
+	return "", "", false
 }
 
 // Check checks if ip belongs to one of CDN, WAF and Cloud . It is generic method for Checkxxx methods
 func (c *Client) Check(inputIp string) (result config.Result) {
 	result.Ip = inputIp
+	result.IsMatch = false
 	ip := net.ParseIP(inputIp)
 	if ip == nil {
-		result.IsMatch = false
+		result.IsMatch = true
+		result.Type = "ip-非法"
+		//不是cdn
 		return
 	}
 	//检查ip是否在缓存中
@@ -312,44 +323,44 @@ func (c *Client) Check(inputIp string) (result config.Result) {
 	result.Location = location
 
 	//腾讯
-	if cdn, isp := c.CheckTencent(ip); cdn != "" {
+	if cdn, isp, iscdn := c.CheckTencent(ip); iscdn {
 		result.Location = location + " " + isp
-		result.IsMatch = true
+		result.IsMatch = iscdn
 		result.Type = "tencent cdn-官方接口查询"
 		result.Value = cdn
 		InsertIPToCache(inputIp, result.Location, cdn)
 		return
 	}
-	if cdn, isp := c.Checkvolcengine(ip); cdn != "" {
+	if cdn, isp, iscdn := c.Checkvolcengine(ip); iscdn {
 		result.Location = location + " " + isp
-		result.IsMatch = true
+		result.IsMatch = iscdn
 		result.Type = "火山云 cdn-官方接口查询"
 		result.Value = cdn
 		InsertIPToCache(inputIp, result.Location, cdn)
 		return
 	}
 	//阿里
-	if cdn, isp := c.CheckAliyun(ip); cdn != "" {
+	if cdn, isp, iscdn := c.CheckAliyun(ip); iscdn {
 		result.Location = location + " " + isp
-		result.IsMatch = true
+		result.IsMatch = iscdn
 		result.Type = "Aliyun cdn-官方接口查询"
 		result.Value = cdn
 		InsertIPToCache(inputIp, result.Location, cdn)
 		return
 	}
 	//百度
-	if cdn, isp := c.CheckBaidu(ip); cdn != "" {
+	if cdn, isp, iscdn := c.CheckBaidu(ip); iscdn {
 		result.Location = location + " " + isp
-		result.IsMatch = true
+		result.IsMatch = iscdn
 		result.Type = "Baidu cdn-官方接口查询"
 		result.Value = cdn
 		InsertIPToCache(inputIp, result.Location, cdn)
 		return
 	}
 	//华为
-	if cdn, isp := c.CheckHuawei(ip); cdn != "" {
+	if cdn, isp, iscdn := c.CheckHuawei(ip); iscdn {
 		result.Location = location + " " + isp
-		result.IsMatch = true
+		result.IsMatch = iscdn
 		result.Type = "华为云 cdn-官方接口查询"
 		result.Value = cdn
 		InsertIPToCache(inputIp, result.Location, cdn)
@@ -376,7 +387,6 @@ func (c *Client) Check(inputIp string) (result config.Result) {
 		result.Value = value
 		return
 	}
-	result.IsMatch = false
 	return
 }
 

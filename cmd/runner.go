@@ -77,10 +77,10 @@ func Run(config *RunnerConfig) {
 	// 启动goroutine来处理结果
 	go func() {
 		for result := range resultChan {
-			if result.Type != "" {
+			if result.IsMatch {
 				fmt.Println(result)
 			}
-			if result.Type == "" {
+			if !result.IsMatch {
 				_, err := writer.WriteString(result.Ip + "\n")
 				if err != nil {
 					slog.Error("写入输出文件时出错: %v", err)

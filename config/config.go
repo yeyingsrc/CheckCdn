@@ -31,7 +31,7 @@ type BATconfig struct {
 
 type Result struct {
 	Ip       string
-	IsMatch  bool   //是否匹配到cdn
+	IsMatch  bool   //是否匹配到cdn true为匹配为cdn
 	Location string //ip位置
 	Type     string //cdn、waf、cloud
 	Value    string //值
@@ -41,7 +41,7 @@ func (r Result) String() string {
 	if r.IsMatch {
 		return fmt.Sprintf("匹配ip成功！ip:%s location:%s type:%s value:%s", r.Ip, r.Location, r.Type, r.Value)
 	}
-	return fmt.Sprintf("未找到！ ip:%s location:%s type:%s value:%s", r.Ip, r.Location, r.Type, r.Value)
+	return fmt.Sprintf("未找到！ip:%s location:%s type:%s value:%s", r.Ip, r.Location, r.Type, r.Value)
 }
 
 // readConfig 从指定的 YAML 文件中读取配置信息并填充到 BATconfig 结构体中
